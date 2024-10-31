@@ -1,0 +1,61 @@
+name: "Konvu"
+on:
+    pull_request:
+        paths-ignore:
+            - 'LICENSE'
+            - 'docs/**'
+    push:
+        tags-ignore:
+            - 'v*'
+        paths-ignore:
+            - '.txt'
+            - '*.MD'
+            - '*.md'
+            - 'LICENSE'
+            - 'docs/**'
+    
+    workflow_dispatch:
+    workflow_call:
+
+jobs:
+    build:
+        runs-on: ubuntu-latest
+        # display name of the job
+        name: "Run tests in CI with Konvu agent"
+        steps:
+            # Uses an default action to checkout the code
+            -   uses: actions/checkout@v4.1.6
+            # Uses an action to add Python to the VM
+            -   name: Setup Python
+                uses: actions/setup-python@v5
+                with:
+                    python-version: '3.7'
+                    architecture: x64
+            # Uses an action to add JDK 21 to the VM (and mvn?)
+            -   name: set up JDK 21
+                uses: actions/setup-java@v4.2.1
+                with:
+                    distribution: 'temurin'
+                    java-version: 21
+                    architecture: x64
+                    cache: 'maven'
+            -   name: Run with Maven
+                run: mvn test-compile
+            -   name: Run Konvu agent
+                run: |
+                    curl --basic -u "$(echo ${{secrets.KONVU_ALPHA_DL_SECRET}} | base64 -d)" -OL https://download.staging.konvu.com/binary/amd64/konvu-ebpf
+                    chmod +x konvu-ebpf
+                    sudo ./konvu-ebpf --token ${{secrets.KONVU_TOKEN}} --host https://sensors.staging.konvu.com --samples-per-second 500 --reporter-interval 10s | tee -a ./konvu.logs &
+                env:
+                    KONVU_TOKEN: ${{secrets.KONVU_TOKEN}}
+                    KONVU_ALPHA_DL_SECRET: ${{secrets.KONVU_ALPHA_DL_SECRET}}
+            -   name: check konvu is running
+                run: |
+                    sleep 3
+                    head ./konvu.logs
+            -   name: Run test with Maven
+                run: mvn test
+            -   name: Wait for report
+                run: sleep 15
+            -   name: Show Konvu logs
+                run: cat konvu.logs
